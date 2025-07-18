@@ -1,0 +1,5 @@
+flask
+python-dotenv
+line-bot-sdk>=3.0.0
+openai
+pinecone
