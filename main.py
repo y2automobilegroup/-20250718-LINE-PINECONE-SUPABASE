@@ -32,9 +32,24 @@ manual_mode = set()
 # ✅ 查詢 Supabase cars 表
 def query_supabase_cars(query: str):
     try:
-        response = supabase.table("cars").select("*").ilike("text", f"%{query}%").limit(3).execute()
+        print(f"[查詢 Supabase] 使用關鍵字：{query}")
+        response = supabase.table("cars") \
+            .select("物件編號, 廠牌, 車款, 車型, 年式, 車輛售價, 車輛賣點, 車輛副標題, 賣家保證, 特色說明") \
+            .ilike("特色說明", f"%{query}%") \
+            .limit(3).execute()
+
+        print(f"[Supabase 結果] {response.data}")
         if response.data:
-            return "\n\n".join([row.get("text", "") for row in response.data])
+            blocks = []
+            for row in response.data:
+                text = f"""【{row.get("廠牌", "")} {row.get("車款", "")}】
+副標：{row.get("車輛副標題", "")}
+賣點：{row.get("車輛賣點", "")}
+特色說明：{row.get("特色說明", "")}
+保固內容：{row.get("賣家保證", "")}
+價格：{row.get("車輛售價", "")} 元"""
+                blocks.append(text)
+            return "\n\n".join(blocks)
         return None
     except Exception as e:
         print(f"[Supabase 查詢錯誤] {e}")
