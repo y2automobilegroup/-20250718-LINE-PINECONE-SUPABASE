@@ -24,7 +24,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ Flask 應用與對話記憶
 app = Flask(__name__)
 user_memory = defaultdict(lambda: deque(maxlen=10))
 manual_mode = set()
@@ -62,9 +61,11 @@ def embed_text(text):
             model="text-embedding-3-small",
             input=[text]
         )
-        return embedding.data[0].embedding
+        result = embedding.data[0].embedding
+        print(f"[✅ Embedding 成功] 長度：{len(result)}")
+        return result
     except Exception as e:
-        print(f"[Embedding 錯誤] {e}")
+        print(f"[❌ Embedding 失敗] {e}")
         return []
 
 # ✅ 處理 LINE Webhook
@@ -86,10 +87,9 @@ def callback():
                 user_id = event.source.user_id
                 query = event.message.text.strip()
 
-                # 記憶對話
+                print(f"[使用者] {user_id} 查詢：{query}")
                 user_memory[user_id].append({"role": "user", "content": query})
 
-                # ✅ 人工客服開啟
                 if query == "人工客服您好":
                     manual_mode.add(user_id)
                     print(f"[人工模式 ON] {user_id}")
@@ -99,7 +99,6 @@ def callback():
                     ))
                     return "OK", 200
 
-                # ✅ 人工客服結束
                 if query == "人工客服結束":
                     manual_mode.discard(user_id)
                     print(f"[人工模式 OFF] {user_id}")
@@ -113,11 +112,23 @@ def callback():
                     print(f"[靜默中] {user_id} 為人工客服中，跳過 GPT 回覆")
                     return "OK", 200
 
-                # ✅ 查詢 Pinecone
                 vector = embed_text(query)
+
+                if not vector:
+                    print("[❌ Pinecone 查詢中止] 無法取得 embedding 向量")
+                    fallback = "亞鈺智能客服您好：目前暫時無法處理您的問題，我們會儘速為您聯繫人工客服協助，敬請見諒 🙏"
+                    user_memory[user_id].append({"role": "assistant", "content": fallback})
+                    line_bot_api.reply_message(ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=fallback)]
+                    ))
+                    return "OK", 200
+
+                print("[🔍 查詢 Pinecone]")
                 res = index.query(vector=vector, top_k=5, include_metadata=True)
                 matches = res.get("matches", [])
                 matches = [m for m in matches if m.get("score", 0) >= 0.2]
+                print(f"[✅ Pinecone 結果] 匹配數：{len(matches)}")
 
                 memory_messages = list(user_memory[user_id])
                 memory_messages.append({"role": "user", "content": query})
@@ -133,17 +144,12 @@ def callback():
                     )
                 }
 
-                user_prompt = {
-                    "role": "user",
-                    "content": ""
-                }
+                user_prompt = {"role": "user", "content": ""}
 
-                # ✅ 如果有 Pinecone 匹配
                 if matches:
                     context = "\n".join([m["metadata"]["text"] for m in matches])
                     user_prompt["content"] = f"參考資料：{context}\n\n問題：{query}"
                 else:
-                    # ✅ 查詢 Supabase 資料表
                     supabase_context = query_supabase_cars(query)
                     if supabase_context:
                         system_prompt["content"] = (
@@ -161,7 +167,6 @@ def callback():
                         ))
                         return "OK", 200
 
-                # ✅ 呼叫 GPT 回覆
                 chat_completion = openai_client.chat.completions.create(
                     model="gpt-4o",
                     messages=[system_prompt] + memory_messages + [user_prompt]
